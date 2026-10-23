@@ -8,3 +8,9 @@ st.page_link(
     icon=":material/bar_chart:",
     width="stretch",
 )
+st.page_link(
+    "app_pages/weather_comparison.py",
+    label="Wetter & Mobilität öffnen",
+    icon=":material/thunderstorm:",
+    width="stretch",
+)

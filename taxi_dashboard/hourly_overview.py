@@ -11,7 +11,8 @@ def load_data():
     """Load hourly ridership data through the Databricks SQL Statement Execution API."""
     response = WorkspaceClient().statement_execution.execute_statement(
         statement=(
-            "SELECT pickup_hour_ts, pickup_dayofweek, is_weekend, trips, total_revenue "
+            "SELECT pickup_hour_ts, pickup_dayofweek, is_weekend, trips, total_revenue, "
+            "avg_trip_duration_min, avg_distance_miles "
             "FROM workspace.gold.hourly_ridership"
         ),
         warehouse_id="b4c5e8896d8800fe",
@@ -40,6 +41,12 @@ def load_data():
     data["pickup_dayofweek"] = pd.to_numeric(data["pickup_dayofweek"], errors="coerce")
     data["trips"] = pd.to_numeric(data["trips"], errors="coerce")
     data["total_revenue"] = pd.to_numeric(data["total_revenue"], errors="coerce")
+    data["avg_trip_duration_min"] = pd.to_numeric(
+        data["avg_trip_duration_min"], errors="coerce"
+    )
+    data["avg_distance_miles"] = pd.to_numeric(
+        data["avg_distance_miles"], errors="coerce"
+    )
     data["is_weekend"] = data["is_weekend"].map(
         lambda value: value if isinstance(value, bool) else str(value).lower() == "true"
     )
@@ -55,6 +62,15 @@ def peak_label(values):
         return "Keine Daten"
     peak = available.max()
     return ", ".join(f"{hour:02d}:00" for hour in available[available == peak].index)
+
+
+def weighted_trip_average(data, column):
+    valid = data[column].notna() & data["trips"].gt(0)
+    if not valid.any():
+        return float("nan")
+    return (data.loc[valid, column] * data.loc[valid, "trips"]).sum() / data.loc[
+        valid, "trips"
+    ].sum()
 
 
 def render_hourly_overview():
@@ -121,6 +137,40 @@ def render_hourly_overview():
         f"{weekend_mean:.1f}" if pd.notna(weekend_mean) else "Keine Daten",
     )
 
+    st.subheader("Durchschnittliche Taxi-Fahrt nach Tagesart")
+    for day_type, label in (
+        ("Werktag", "Werktage"),
+        ("Wochenende", "Wochenenden"),
+    ):
+        day_data = filtered.loc[filtered["day_type"] == day_type]
+        with st.container():
+            st.markdown(f"**{label}**")
+            metrics = st.columns(3)
+            avg_distance = weighted_trip_average(day_data, "avg_distance_miles")
+            avg_duration = weighted_trip_average(day_data, "avg_trip_duration_min")
+            valid_revenue = day_data["total_revenue"].notna() & day_data["trips"].gt(0)
+            trip_count = day_data.loc[valid_revenue, "trips"].sum()
+            revenue_per_trip = (
+                day_data.loc[valid_revenue, "total_revenue"].sum() / trip_count
+                if trip_count > 0
+                else float("nan")
+            )
+            metrics[0].metric(
+                "Ø Strecke / Fahrt",
+                f"{avg_distance:.1f} mi" if pd.notna(avg_distance) else "Keine Daten",
+            )
+            metrics[1].metric(
+                "Ø Fahrtdauer",
+                f"{avg_duration:.1f} Min." if pd.notna(avg_duration) else "Keine Daten",
+            )
+            metrics[2].metric(
+                "Ø Umsatz / Fahrt",
+                f"${revenue_per_trip:.2f}"
+                if pd.notna(revenue_per_trip)
+                else "Keine Daten",
+                help="Berechnet aus total_revenue / trips; total_revenue summiert total_amount.",
+            )
+
     comparison = pd.DataFrame(
         {"Werktag": weekday_values, "Wochenende": weekend_values}
     ).dropna()
@@ -155,49 +205,31 @@ def render_hourly_overview():
     profile_chart.update_xaxes(tickmode="linear", dtick=1)
     st.plotly_chart(profile_chart, width="stretch")
 
-    left, right = st.columns(2)
-    with left:
-        heatmap = (
-            filtered.groupby(["weekday", "hour"], observed=True)["trips"]
-            .mean()
-            .unstack("hour")
-            .reindex(
-                [
-                    "Montag",
-                    "Dienstag",
-                    "Mittwoch",
-                    "Donnerstag",
-                    "Freitag",
-                    "Samstag",
-                    "Sonntag",
-                ]
-            )
-            .reindex(columns=hours)
+    heatmap = (
+        filtered.groupby(["weekday", "hour"], observed=True)["trips"]
+        .mean()
+        .unstack("hour")
+        .reindex(
+            [
+                "Montag",
+                "Dienstag",
+                "Mittwoch",
+                "Donnerstag",
+                "Freitag",
+                "Samstag",
+                "Sonntag",
+            ]
         )
-        heatmap_chart = px.imshow(
-            heatmap,
-            labels={"x": "Stunde", "y": "Wochentag", "color": "Ø Fahrten"},
-            aspect="auto",
-            color_continuous_scale="Blues",
-        )
-        heatmap_chart.update_xaxes(tickmode="linear", dtick=1)
-        st.plotly_chart(heatmap_chart, width="stretch")
-
-    with right:
-        difference_chart = go.Figure(
-            go.Bar(
-                x=hours,
-                y=weekday_values - weekend_values,
-                marker_color="#424242",
-            )
-        )
-        difference_chart.add_hline(y=0, line_color="#424242")
-        difference_chart.update_layout(
-            xaxis_title="Stunde",
-            yaxis_title="Werktag minus Wochenende (Ø Fahrten)",
-        )
-        difference_chart.update_xaxes(tickmode="linear", dtick=1)
-        st.plotly_chart(difference_chart, width="stretch")
+        .reindex(columns=hours)
+    )
+    heatmap_chart = px.imshow(
+        heatmap,
+        labels={"x": "Stunde", "y": "Wochentag", "color": "Ø Fahrten"},
+        aspect="auto",
+        color_continuous_scale="Blues",
+    )
+    heatmap_chart.update_xaxes(tickmode="linear", dtick=1)
+    st.plotly_chart(heatmap_chart, width="stretch")
 
     revenue_chart = px.line(
         hourly,
@@ -216,23 +248,37 @@ def render_hourly_overview():
     revenue_chart.update_xaxes(tickmode="linear", dtick=1)
     st.plotly_chart(revenue_chart, width="stretch")
 
-    st.subheader("Details")
-    details = hourly.rename(
-        columns={
-            "hour": "Stunde",
-            "day_type": "Tagesart",
-            "observations": "Beobachtungen",
-            "trips": "Ø Fahrten",
-            "revenue": "Ø Stundenumsatz",
-        }
+    st.subheader("Durchschnittlicher Umsatz nach Wochentag und Uhrzeit")
+    weekday_order = [
+        "Montag",
+        "Dienstag",
+        "Mittwoch",
+        "Donnerstag",
+        "Freitag",
+        "Samstag",
+        "Sonntag",
+    ]
+    revenue_heatmap = (
+        filtered.groupby(["weekday", "hour"], observed=True)["total_revenue"]
+        .mean()
+        .unstack("hour")
+        .reindex(weekday_order)
+        .reindex(columns=hours)
     )
-    st.dataframe(
-        details[
-            ["Stunde", "Tagesart", "Beobachtungen", "Ø Fahrten", "Ø Stundenumsatz"]
-        ].sort_values(["Stunde", "Tagesart"]),
-        width="stretch",
-        hide_index=True,
+    revenue_heatmap_chart = px.imshow(
+        revenue_heatmap,
+        labels={"x": "Uhrzeit", "y": "Wochentag", "color": "Ø Umsatz"},
+        aspect="auto",
+        color_continuous_scale="Oranges",
     )
+    revenue_heatmap_chart.update_xaxes(
+        tickmode="linear",
+        dtick=1,
+        ticktext=[f"{hour:02d}:00" for hour in hours],
+        tickvals=hours,
+    )
+    revenue_heatmap_chart.update_coloraxes(colorbar_tickprefix="$")
+    st.plotly_chart(revenue_heatmap_chart, width="stretch")
 
     duplicate_count = int(filtered["pickup_hour_ts"].duplicated().sum())
     expected_rows = sum(

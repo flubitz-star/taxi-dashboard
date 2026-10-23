@@ -11,6 +11,11 @@ page = st.navigation(
             title="Hourly Overview",
             icon=":material/bar_chart:",
         ),
+        st.Page(
+            "app_pages/weather_comparison.py",
+            title="Wetter & Mobilität",
+            icon=":material/thunderstorm:",
+        ),
     ],
     position="top",
 )
