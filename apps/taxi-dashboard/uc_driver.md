@@ -35,7 +35,7 @@ Ergebnisse. Das Dashboard berechnet alle Werte aus dem ausgewählten Zeitraum.
 
 | Eigenschaft | Wert |
 | --- | --- |
-| Tabelle | `workspace.gold.hourly_ridership` |
+| Tabelle | `taxi_dev.gold.hourly_ridership` |
 | Erwartete Granularität | Eine Zeile je Kalendertag und Stunde |
 | Dokumentierter Umfang | Februar und August 2026, zusammen 1.416 Stunden |
 | Referenzanalyse | Notebook `05_analytics_taxi_weekday`, Stundenprofil |
