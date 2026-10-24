@@ -2,7 +2,6 @@
 
 import streamlit as st
 
-
 st.caption("Willkommen beim Taxi Dashboard. Wähle eine Auswertung über die Navigation.")
 st.page_link(
     "app_pages/hourly_overview.py",

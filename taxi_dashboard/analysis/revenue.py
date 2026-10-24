@@ -142,9 +142,7 @@ def render_revenue_analysis() -> None:
         end_date = selected_dates[-1]
         if len(selected_dates) == 1:
             end_date = start_date
-        filtered = data.loc[
-            data["pickup_date"].dt.date.between(start_date, end_date)
-        ].copy()
+        filtered = data.loc[data["pickup_date"].dt.date.between(start_date, end_date)].copy()
     else:
         start_date = end_date = selected_dates
         filtered = data.loc[data["pickup_date"].dt.date == start_date].copy()
@@ -166,13 +164,9 @@ def render_revenue_analysis() -> None:
     zone_revenue = filtered.groupby("pu_zone")["total_revenue"].sum()
     borough_revenue = filtered.groupby("pu_borough")["total_revenue"].sum()
     top_zone = zone_revenue.idxmax() if not zone_revenue.empty else "Keine Daten"
-    top_borough = (
-        borough_revenue.idxmax() if not borough_revenue.empty else "Keine Daten"
-    )
+    top_borough = borough_revenue.idxmax() if not borough_revenue.empty else "Keine Daten"
     top_zone_amount = zone_revenue.max() if not zone_revenue.empty else float("nan")
-    top_borough_amount = (
-        borough_revenue.max() if not borough_revenue.empty else float("nan")
-    )
+    top_borough_amount = borough_revenue.max() if not borough_revenue.empty else float("nan")
 
     st.caption(f"Zeitraum: {start_date:%d.%m.%Y} – {end_date:%d.%m.%Y}")
     kpis = st.columns(6)
@@ -192,12 +186,9 @@ def render_revenue_analysis() -> None:
     borough_data["revenue_share_pct"] = (
         borough_data["total_revenue"] / borough_data["total_revenue"].sum() * 100
     )
-    borough_data["trip_share_pct"] = (
-        borough_data["trips"] / borough_data["trips"].sum() * 100
-    )
-    borough_data["revenue_per_trip"] = (
-        borough_data["total_revenue"]
-        / borough_data["trips"].where(borough_data["trips"] > 0)
+    borough_data["trip_share_pct"] = borough_data["trips"] / borough_data["trips"].sum() * 100
+    borough_data["revenue_per_trip"] = borough_data["total_revenue"] / borough_data["trips"].where(
+        borough_data["trips"] > 0
     )
     st.subheader("Umsatz nach Abhol-Bezirk")
     borough_chart = px.bar(
@@ -234,8 +225,8 @@ def render_revenue_analysis() -> None:
         .sort_values("total_revenue", ascending=False)
         .head(15)
     )
-    zone_data["revenue_per_trip"] = (
-        zone_data["total_revenue"] / zone_data["trips"].where(zone_data["trips"] > 0)
+    zone_data["revenue_per_trip"] = zone_data["total_revenue"] / zone_data["trips"].where(
+        zone_data["trips"] > 0
     )
     st.subheader("Top 15 Pickup-Zonen nach Umsatz")
     zone_chart = px.bar(
@@ -321,29 +312,23 @@ def render_revenue_analysis() -> None:
 
     # Revenue per weekday; avg_revenue_per_day divides by the number of distinct
     # dates of that weekday in the selected range.
-    weekday_data = (
-        filtered.groupby(
-            ["pickup_dayofweek", "pickup_weekday", "is_weekend"], as_index=False
-        )
-        .agg(
-            trips=("trips", "sum"),
-            total_revenue=("total_revenue", "sum"),
-            days=("pickup_date", "nunique"),
-            avg_fare=("avg_fare", "mean"),
-            avg_tip=("avg_tip", "mean"),
-        )
+    weekday_data = filtered.groupby(
+        ["pickup_dayofweek", "pickup_weekday", "is_weekend"], as_index=False
+    ).agg(
+        trips=("trips", "sum"),
+        total_revenue=("total_revenue", "sum"),
+        days=("pickup_date", "nunique"),
+        avg_fare=("avg_fare", "mean"),
+        avg_tip=("avg_tip", "mean"),
     )
-    weekday_data["avg_revenue_per_day"] = (
-        weekday_data["total_revenue"]
-        / weekday_data["days"].where(weekday_data["days"] > 0)
-    )
+    weekday_data["avg_revenue_per_day"] = weekday_data["total_revenue"] / weekday_data[
+        "days"
+    ].where(weekday_data["days"] > 0)
     weekday_data["pickup_weekday"] = pd.Categorical(
         weekday_data["pickup_weekday"], categories=WEEKDAY_ORDER, ordered=True
     )
     weekday_data = weekday_data.sort_values("pickup_weekday")
-    weekday_data["weekend_label"] = weekday_data["is_weekend"].map(
-        {True: "Ja", False: "Nein"}
-    )
+    weekday_data["weekend_label"] = weekday_data["is_weekend"].map({True: "Ja", False: "Nein"})
     st.subheader("Umsatz nach Wochentag")
     weekday_chart = px.bar(
         weekday_data,

@@ -96,9 +96,7 @@ def load_weather_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     daily["taxi_share_pct"] = daily["taxi_share_pct"].where(
         daily["taxi_share_pct"].notna(), computed_share
     )
-    hourly["taxi_share_pct"] = _share_from_counts(
-        hourly["taxi_trips"], hourly["bike_trips"]
-    )
+    hourly["taxi_share_pct"] = _share_from_counts(hourly["taxi_trips"], hourly["bike_trips"])
     daily["month"] = daily["pickup_date"].dt.strftime("%Y-%m")
     hourly["month"] = hourly["pickup_date"].dt.strftime("%Y-%m")
     return daily, hourly
@@ -316,7 +314,7 @@ def _temperature_chart(hourly: pd.DataFrame) -> go.Figure:
             marker_color=palette,
             text=[
                 f"{value:.1f}%<br>n={int(count)}" if pd.notna(value) else "n=0"
-                for value, count in zip(summary["taxi_share"], summary["observations"])
+                for value, count in zip(summary["taxi_share"], summary["observations"], strict=True)
             ],
             textposition="outside",
             showlegend=False,
@@ -382,7 +380,7 @@ def _hourly_rain_chart(hourly: pd.DataFrame) -> go.Figure:
             marker_color=["#43A047", "#FDD835", "#FB8C00", "#E53935"],
             text=[
                 f"{value:.1f}%<br>n={int(count)}" if pd.notna(value) else "n=0"
-                for value, count in zip(summary["taxi_share"], summary["observations"])
+                for value, count in zip(summary["taxi_share"], summary["observations"], strict=True)
             ],
             textposition="outside",
             showlegend=False,
@@ -408,7 +406,7 @@ def _data_quality_messages(daily: pd.DataFrame, hourly: pd.DataFrame) -> list[st
     """Return warnings about duplicate rows, invalid dates or negative trip counts."""
     # Validate the selected month for duplicate rows, missing timestamps, or invalid counts.
     messages = []
-    for label, frame, key, expected_per_day in (
+    for label, frame, key, _expected_per_day in (
         ("Tagesdaten", daily, "pickup_date", 1),
         ("Stundendaten", hourly, ["pickup_date", "pickup_hour"], 24),
     ):
@@ -447,7 +445,9 @@ def render_weather_comparison() -> None:
     if daily.empty:
         st.warning("Keine Tagesdaten verfügbar; Monatsübersicht und Tagesanalyse entfallen.")
     if hourly.empty:
-        st.warning("Keine Stundendaten verfügbar; Temperatur- und Regenintensitätsanalyse entfallen.")
+        st.warning(
+            "Keine Stundendaten verfügbar; Temperatur- und Regenintensitätsanalyse entfallen."
+        )
 
     available_months = sorted(
         set(daily["month"].dropna().unique()) | set(hourly["month"].dropna().unique())

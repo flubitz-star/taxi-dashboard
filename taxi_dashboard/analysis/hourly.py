@@ -36,12 +36,8 @@ def load_data():
     data["pickup_dayofweek"] = pd.to_numeric(data["pickup_dayofweek"], errors="coerce")
     data["trips"] = pd.to_numeric(data["trips"], errors="coerce")
     data["total_revenue"] = pd.to_numeric(data["total_revenue"], errors="coerce")
-    data["avg_trip_duration_min"] = pd.to_numeric(
-        data["avg_trip_duration_min"], errors="coerce"
-    )
-    data["avg_distance_miles"] = pd.to_numeric(
-        data["avg_distance_miles"], errors="coerce"
-    )
+    data["avg_trip_duration_min"] = pd.to_numeric(data["avg_trip_duration_min"], errors="coerce")
+    data["avg_distance_miles"] = pd.to_numeric(data["avg_distance_miles"], errors="coerce")
     data["is_weekend"] = data["is_weekend"].map(normalize_boolean)
     data["hour"] = data["pickup_hour_ts"].dt.hour
     data["month"] = data["pickup_hour_ts"].dt.strftime("%Y-%m")
@@ -104,7 +100,9 @@ def render_hourly_overview():
 
     months = sorted(df["month"].dropna().unique())
     selected_month = st.selectbox("Monat", ["Alle verfügbaren Monate", *months])
-    filtered = df if selected_month == "Alle verfügbaren Monate" else df[df["month"] == selected_month]
+    filtered = (
+        df if selected_month == "Alle verfügbaren Monate" else df[df["month"] == selected_month]
+    )
 
     # Spark dayofweek: 1 = Sunday ... 7 = Saturday (German display names).
     day_names = {
@@ -179,9 +177,7 @@ def render_hourly_overview():
             )
             metrics[2].metric(
                 "Ø Umsatz / Fahrt",
-                f"${revenue_per_trip:.2f}"
-                if pd.notna(revenue_per_trip)
-                else "Keine Daten",
+                f"${revenue_per_trip:.2f}" if pd.notna(revenue_per_trip) else "Keine Daten",
                 help="Berechnet aus total_revenue / trips; total_revenue summiert total_amount.",
             )
 
@@ -212,9 +208,7 @@ def render_hourly_overview():
                 line={"color": color},
             )
         )
-    profile_chart.update_layout(
-        xaxis_title="Stunde", yaxis_title="Ø Fahrten / beobachtete Stunde"
-    )
+    profile_chart.update_layout(xaxis_title="Stunde", yaxis_title="Ø Fahrten / beobachtete Stunde")
     profile_chart.update_xaxes(tickmode="linear", dtick=1)
     st.plotly_chart(profile_chart, width="stretch")
 
@@ -296,6 +290,4 @@ def render_hourly_overview():
             "vorhandene Zeilen; fehlende Stunden werden nicht als null gewertet."
         )
     else:
-        st.caption(
-            f"Datenprüfung: {len(filtered)} eindeutige Stundenzeilen; keine Stunden fehlen."
-        )
+        st.caption(f"Datenprüfung: {len(filtered)} eindeutige Stundenzeilen; keine Stunden fehlen.")
