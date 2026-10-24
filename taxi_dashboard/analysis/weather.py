@@ -12,11 +12,15 @@ from taxi_dashboard.config import (
     BIKE_COLOR,
     DAILY_TABLE,
     HOURLY_TABLE,
-    RAIN_BUCKETS,
     TAXI_COLOR,
-    TEMP_BUCKETS,
 )
-from taxi_dashboard.data.databricks import normalize_boolean, query_table
+from taxi_dashboard.data.databricks import query_table
+from taxi_dashboard.metrics.weather import (
+    data_quality_messages,
+    prepare_weather_data,
+    rain_groups,
+    temperature_groups,
+)
 
 
 @st.cache_data(ttl=300)
@@ -60,58 +64,7 @@ def load_weather_data() -> tuple[pd.DataFrame, pd.DataFrame]:
         ],
     )
 
-    for frame, numeric_columns in (
-        (
-            daily,
-            [
-                "taxi_trips",
-                "bike_trips",
-                "bike_share_pct",
-                "avg_temp_c",
-                "max_temp_c",
-                "min_temp_c",
-                "total_rain_mm",
-                "hours_rain",
-            ],
-        ),
-        (
-            hourly,
-            [
-                "pickup_hour",
-                "taxi_trips",
-                "bike_trips",
-                "temperature_2m_c",
-                "rain_mm",
-            ],
-        ),
-    ):
-        frame["pickup_date"] = pd.to_datetime(frame["pickup_date"], errors="coerce")
-        for column in numeric_columns:
-            frame[column] = pd.to_numeric(frame[column], errors="coerce")
-        if "has_rain" in frame:
-            frame["has_rain"] = frame["has_rain"].map(_to_bool)
-
-    daily["taxi_share_pct"] = 100 - daily["bike_share_pct"]
-    computed_share = _share_from_counts(daily["taxi_trips"], daily["bike_trips"])
-    daily["taxi_share_pct"] = daily["taxi_share_pct"].where(
-        daily["taxi_share_pct"].notna(), computed_share
-    )
-    hourly["taxi_share_pct"] = _share_from_counts(hourly["taxi_trips"], hourly["bike_trips"])
-    daily["month"] = daily["pickup_date"].dt.strftime("%Y-%m")
-    hourly["month"] = hourly["pickup_date"].dt.strftime("%Y-%m")
-    return daily, hourly
-
-
-def _to_bool(value: object) -> bool | None:
-    """Convert a Databricks boolean-like value to bool (None if unknown)."""
-    return normalize_boolean(value)
-
-
-def _share_from_counts(taxi: pd.Series, bike: pd.Series) -> pd.Series:
-    """Return taxi trips as a percentage of taxi plus bike trips (NaN if no trips)."""
-    # Calculate taxi share from raw counts while guarding against zero totals.
-    total = taxi + bike
-    return (100 * taxi / total).where(total > 0)
+    return prepare_weather_data(daily, hourly)
 
 
 def _format_number(value: float, suffix: str = "") -> str:
@@ -124,58 +77,6 @@ def _format_percent(value: float) -> str:
     """Format a percentage with one decimal place, or "Keine Daten" if missing."""
     # Keep percentage values with a single decimal place for clean dashboard output.
     return f"{value:.1f}%" if pd.notna(value) else "Keine Daten"
-
-
-def _temperature_groups(hourly: pd.DataFrame) -> pd.DataFrame:
-    """Group hourly rows into temperature buckets (see TEMP_BUCKETS).
-
-    Returns one row per bucket with the mean taxi share, mean taxi and bike trips
-    per hour, and `observations`, the number of hourly rows in the bucket.
-    """
-    # Aggregate hourly trips by temperature bucket to compare trip demand and taxi share.
-    data = hourly.dropna(subset=["temperature_2m_c", "taxi_share_pct"]).copy()
-    data["temp_bucket"] = pd.cut(
-        data["temperature_2m_c"],
-        bins=[-float("inf"), 15, 20, 25, 30, float("inf")],
-        labels=TEMP_BUCKETS,
-        right=False,
-    )
-    return (
-        data.groupby("temp_bucket", observed=False)
-        .agg(
-            taxi_share=("taxi_share_pct", "mean"),
-            taxi_trips=("taxi_trips", "mean"),
-            bike_trips=("bike_trips", "mean"),
-            observations=("taxi_share_pct", "count"),
-        )
-        .reindex(TEMP_BUCKETS)
-        .reset_index()
-    )
-
-
-def _rain_groups(hourly: pd.DataFrame) -> pd.DataFrame:
-    """Group hourly rows into rain-intensity buckets (see RAIN_BUCKETS).
-
-    Returns one row per bucket with the mean taxi share and `observations`, the
-    number of hourly rows (not trips) in the bucket.
-    """
-    # Group hourly records by rain intensity to reveal how precipitation affects taxi demand.
-    data = hourly.dropna(subset=["rain_mm", "taxi_share_pct"]).copy()
-    data["rain_bucket"] = pd.cut(
-        data["rain_mm"].clip(lower=0),
-        bins=[-float("inf"), 0.01, 0.5, 2, float("inf")],
-        labels=RAIN_BUCKETS,
-        right=False,
-    )
-    return (
-        data.groupby("rain_bucket", observed=False)
-        .agg(
-            taxi_share=("taxi_share_pct", "mean"),
-            observations=("taxi_share_pct", "count"),
-        )
-        .reindex(RAIN_BUCKETS)
-        .reset_index()
-    )
 
 
 def _monthly_chart(daily: pd.DataFrame) -> go.Figure:
@@ -285,7 +186,7 @@ def _temperature_chart(hourly: pd.DataFrame) -> go.Figure:
     each temperature bucket.
     """
     # Plot average trip counts and taxi share grouped by hourly temperature bands.
-    summary = _temperature_groups(hourly)
+    summary = temperature_groups(hourly)
     fig = make_subplots(
         rows=1,
         cols=2,
@@ -372,7 +273,7 @@ def _hourly_rain_chart(hourly: pd.DataFrame) -> go.Figure:
     hourly rows in each bucket.
     """
     # Compare taxi share across hourly rain intensities to reveal weather sensitivity.
-    summary = _rain_groups(hourly)
+    summary = rain_groups(hourly)
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
@@ -401,26 +302,6 @@ def _hourly_rain_chart(hourly: pd.DataFrame) -> go.Figure:
     fig.update_xaxes(title_text="Stündliche Regenintensität")
     fig.update_yaxes(title_text="Ø Taxi-Share", ticksuffix="%")
     return fig
-
-
-def _data_quality_messages(daily: pd.DataFrame, hourly: pd.DataFrame) -> list[str]:
-    """Return warnings about duplicate rows, invalid dates or negative trip counts."""
-    # Validate the selected month for duplicate rows, missing timestamps, or invalid counts.
-    messages = []
-    for label, frame, key, _expected_per_day in (
-        ("Tagesdaten", daily, "pickup_date", 1),
-        ("Stundendaten", hourly, ["pickup_date", "pickup_hour"], 24),
-    ):
-        duplicates = int(frame.duplicated(subset=key).sum())
-        if duplicates:
-            messages.append(f"{label}: {duplicates} doppelte Zeilen.")
-    if daily["pickup_date"].isna().any() or hourly["pickup_date"].isna().any():
-        messages.append("Einige Zeilen haben kein gültiges Datum und werden nicht ausgewertet.")
-    if (daily[["taxi_trips", "bike_trips"]] < 0).any().any() or (
-        hourly[["taxi_trips", "bike_trips"]] < 0
-    ).any().any():
-        messages.append("Negative Trip-Zahlen entdeckt; bitte die Quelldaten prüfen.")
-    return messages
 
 
 def render_weather_comparison() -> None:
@@ -459,7 +340,7 @@ def render_weather_comparison() -> None:
     selected_month = st.selectbox("Monat", available_months, index=len(available_months) - 1)
     month_daily = daily.loc[daily["month"] == selected_month].copy()
     month_hourly = hourly.loc[hourly["month"] == selected_month].copy()
-    quality_messages = _data_quality_messages(month_daily, month_hourly)
+    quality_messages = data_quality_messages(month_daily, month_hourly)
     for message in quality_messages:
         st.warning(f"Datenprüfung: {message}")
 

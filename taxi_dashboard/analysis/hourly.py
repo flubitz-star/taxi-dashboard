@@ -7,6 +7,7 @@ import streamlit as st
 
 from taxi_dashboard.config import HOURLY_RIDERSHIP_TABLE
 from taxi_dashboard.data.databricks import normalize_boolean, query_table
+from taxi_dashboard.metrics.hourly import peak_label, weighted_trip_average
 
 
 @st.cache_data(ttl=300)
@@ -43,37 +44,6 @@ def load_data():
     data["month"] = data["pickup_hour_ts"].dt.strftime("%Y-%m")
     data["day_type"] = data["is_weekend"].map({False: "Werktag", True: "Wochenende"})
     return data
-
-
-def peak_label(values):
-    """Return the hour(s) with the highest value in a series.
-
-    Args:
-        values: Series indexed by hour of day (0-23).
-
-    Returns:
-        A label such as "18:00" (several hours are comma-separated), or
-        "Keine Daten" if the series has no values.
-    """
-    available = values.dropna()
-    if available.empty:
-        return "Keine Daten"
-    peak = available.max()
-    return ", ".join(f"{hour:02d}:00" for hour in available[available == peak].index)
-
-
-def weighted_trip_average(data, column):
-    """Compute a trip-weighted mean of a per-row average such as distance or duration.
-
-    Rows with a missing value or zero trips are ignored. Returns NaN if no row
-    qualifies.
-    """
-    valid = data[column].notna() & data["trips"].gt(0)
-    if not valid.any():
-        return float("nan")
-    return (data.loc[valid, column] * data.loc[valid, "trips"]).sum() / data.loc[
-        valid, "trips"
-    ].sum()
 
 
 def render_hourly_overview():

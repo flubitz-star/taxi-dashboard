@@ -11,6 +11,8 @@ import streamlit as st
 
 from taxi_dashboard.config import ZONE_REVENUE_TABLE
 from taxi_dashboard.data.databricks import normalize_boolean, query_table
+from taxi_dashboard.metrics.averages import weighted_trip_average
+from taxi_dashboard.metrics.revenue import weighted_averages_by
 
 # Maps Spark's dayofweek (1 = Sunday ... 7 = Saturday) to the German display names.
 # The table's own `pickup_weekday` column is English, so it is not used for display.
@@ -160,7 +162,7 @@ def render_revenue_analysis() -> None:
         if pd.notna(total_revenue) and pd.notna(total_trips) and total_trips > 0
         else float("nan")
     )
-    avg_tip = filtered["avg_tip"].mean()
+    avg_tip = weighted_trip_average(filtered, "avg_tip")
     zone_revenue = filtered.groupby("pu_zone")["total_revenue"].sum()
     borough_revenue = filtered.groupby("pu_borough")["total_revenue"].sum()
     top_zone = zone_revenue.idxmax() if not zone_revenue.empty else "Keine Daten"
@@ -173,7 +175,11 @@ def render_revenue_analysis() -> None:
     kpis[0].metric("Gesamtumsatz", _money(total_revenue))
     kpis[1].metric("Gesamtfahrten", _count(total_trips))
     kpis[2].metric("Ø Umsatz pro Fahrt", _money(revenue_per_trip, 2))
-    kpis[3].metric("Ø Trinkgeld", _money(avg_tip, 2))
+    kpis[3].metric(
+        "Ø Trinkgeld/Fahrt",
+        _money(avg_tip, 2),
+        help="Nach Fahrten gewichteter Mittelwert der Trinkgeld-Stundenwerte.",
+    )
     kpis[4].metric("Top-Zone", top_zone, help=_money(top_zone_amount))
     kpis[5].metric("Top-Abhol-Bezirk", top_borough, help=_money(top_borough_amount))
 
@@ -211,20 +217,22 @@ def render_revenue_analysis() -> None:
         alt="Horizontaler Balkenvergleich des Gesamtumsatzes je Abhol-Bezirk.",
     )
 
-    # Top 15 pickup zones by total revenue; averages are simple means over hourly rows.
+    # Top 15 pickup zones by total revenue; source averages are weighted by trips.
+    zone_group_columns = ["pu_zone", "pu_borough"]
     zone_data = (
-        filtered.groupby(["pu_zone", "pu_borough"], as_index=False)
+        filtered.groupby(zone_group_columns, as_index=False)
         .agg(
             trips=("trips", "sum"),
             total_revenue=("total_revenue", "sum"),
             avg_fare=("avg_fare", "mean"),
-            avg_tip=("avg_tip", "mean"),
             avg_distance_miles=("avg_distance_miles", "mean"),
             avg_trip_duration_min=("avg_trip_duration_min", "mean"),
         )
         .sort_values("total_revenue", ascending=False)
         .head(15)
     )
+    zone_tips = weighted_averages_by(filtered, zone_group_columns, "avg_tip")
+    zone_data = zone_data.merge(zone_tips, on=zone_group_columns, how="left")
     zone_data["revenue_per_trip"] = zone_data["total_revenue"] / zone_data["trips"].where(
         zone_data["trips"] > 0
     )
@@ -239,6 +247,7 @@ def render_revenue_analysis() -> None:
             "total_revenue": "Umsatz ($)",
             "pu_zone": "Pickup-Zone",
             "pu_borough": "Abhol-Bezirk",
+            "avg_tip": "Ø Trinkgeld/Fahrt ($)",
         },
         hover_data={
             "trips": ":,.0f",
@@ -275,7 +284,7 @@ def render_revenue_analysis() -> None:
                 "trips": "Fahrten",
                 "revenue_per_trip": "Umsatz/Fahrt ($)",
                 "avg_fare": "Ø Fare ($)",
-                "avg_tip": "Ø Tip ($)",
+                "avg_tip": "Ø Trinkgeld/Fahrt ($)",
                 "avg_distance_miles": "Ø Distanz (mi)",
                 "avg_trip_duration_min": "Ø Dauer (min)",
             }
@@ -312,15 +321,15 @@ def render_revenue_analysis() -> None:
 
     # Revenue per weekday; avg_revenue_per_day divides by the number of distinct
     # dates of that weekday in the selected range.
-    weekday_data = filtered.groupby(
-        ["pickup_dayofweek", "pickup_weekday", "is_weekend"], as_index=False
-    ).agg(
+    weekday_group_columns = ["pickup_dayofweek", "pickup_weekday", "is_weekend"]
+    weekday_data = filtered.groupby(weekday_group_columns, as_index=False).agg(
         trips=("trips", "sum"),
         total_revenue=("total_revenue", "sum"),
         days=("pickup_date", "nunique"),
         avg_fare=("avg_fare", "mean"),
-        avg_tip=("avg_tip", "mean"),
     )
+    weekday_tips = weighted_averages_by(filtered, weekday_group_columns, "avg_tip")
+    weekday_data = weekday_data.merge(weekday_tips, on=weekday_group_columns, how="left")
     weekday_data["avg_revenue_per_day"] = weekday_data["total_revenue"] / weekday_data[
         "days"
     ].where(weekday_data["days"] > 0)
@@ -367,7 +376,7 @@ def render_revenue_analysis() -> None:
                 "trips": "Fahrten",
                 "avg_revenue_per_day": "Ø Umsatz/Tag ($)",
                 "avg_fare": "Ø Fare ($)",
-                "avg_tip": "Ø Tip ($)",
+                "avg_tip": "Ø Trinkgeld/Fahrt ($)",
             }
         ),
         hide_index=True,
