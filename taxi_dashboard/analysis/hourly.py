@@ -11,7 +11,12 @@ from taxi_dashboard.data.databricks import normalize_boolean, query_table
 
 @st.cache_data(ttl=300)
 def load_data():
-    """Load hourly ridership data from the Databricks Gold layer."""
+    """Load hourly ridership data from the Databricks Gold layer.
+
+    Converts the string values returned by Databricks to proper types and adds the
+    helper columns `hour`, `month` ("YYYY-MM") and `day_type` ("Werktag" or
+    "Wochenende"). The result is cached for five minutes.
+    """
     data = query_table(
         HOURLY_RIDERSHIP_TABLE,
         [
@@ -45,7 +50,15 @@ def load_data():
 
 
 def peak_label(values):
-    """Return the hour(s) with the highest value in a series."""
+    """Return the hour(s) with the highest value in a series.
+
+    Args:
+        values: Series indexed by hour of day (0-23).
+
+    Returns:
+        A label such as "18:00" (several hours are comma-separated), or
+        "Keine Daten" if the series has no values.
+    """
     available = values.dropna()
     if available.empty:
         return "Keine Daten"
@@ -54,7 +67,11 @@ def peak_label(values):
 
 
 def weighted_trip_average(data, column):
-    """Compute a weighted mean for trip-based metrics such as distance or duration."""
+    """Compute a trip-weighted mean of a per-row average such as distance or duration.
+
+    Rows with a missing value or zero trips are ignored. Returns NaN if no row
+    qualifies.
+    """
     valid = data[column].notna() & data["trips"].gt(0)
     if not valid.any():
         return float("nan")
@@ -64,7 +81,12 @@ def weighted_trip_average(data, column):
 
 
 def render_hourly_overview():
-    """Render the hourly overview page with KPI cards and hourly trend charts."""
+    """Render the hourly overview page with KPI cards and hourly trend charts.
+
+    Shows peak hours and average trips for weekdays vs. weekends, average trip
+    distance, duration and revenue, hourly profiles, weekday-by-hour heatmaps and
+    a data-quality check for missing or duplicate hours.
+    """
     st.caption(
         "Fahrten je beobachteter Stunde zeigen Nachfrage, nicht die Anzahl gleichzeitig "
         "benötigter Taxis."
@@ -84,6 +106,7 @@ def render_hourly_overview():
     selected_month = st.selectbox("Monat", ["Alle verfügbaren Monate", *months])
     filtered = df if selected_month == "Alle verfügbaren Monate" else df[df["month"] == selected_month]
 
+    # Spark dayofweek: 1 = Sunday ... 7 = Saturday (German display names).
     day_names = {
         1: "Sonntag",
         2: "Montag",
@@ -95,6 +118,7 @@ def render_hourly_overview():
     }
     filtered = filtered.copy()
     filtered["weekday"] = filtered["pickup_dayofweek"].map(day_names)
+    # Average trips and revenue per observed hour of day, split by weekday/weekend.
     hours = list(range(24))
     hourly = (
         filtered.groupby(["hour", "day_type"], observed=True)
@@ -161,6 +185,7 @@ def render_hourly_overview():
                 help="Berechnet aus total_revenue / trips; total_revenue summiert total_amount.",
             )
 
+    # Compare the two day types to find the hour where they differ the most.
     comparison = pd.DataFrame({"Werktag": weekday_values, "Wochenende": weekend_values}).dropna()
     if not comparison.empty:
         differences = comparison["Werktag"] - comparison["Wochenende"]
@@ -258,6 +283,7 @@ def render_hourly_overview():
     revenue_heatmap_chart.update_coloraxes(colorbar_tickprefix="$")
     st.plotly_chart(revenue_heatmap_chart, width="stretch")
 
+    # Data check: every hour of each selected month should appear exactly once.
     duplicate_count = int(filtered["pickup_hour_ts"].duplicated().sum())
     expected_rows = sum(
         period.days_in_month * 24

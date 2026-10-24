@@ -1,3 +1,5 @@
+"""Streamlit entry point: configures the app and registers all dashboard pages."""
+
 import streamlit as st
 
 
@@ -16,9 +18,15 @@ page = st.navigation(
             title="Wetter & Mobilität",
             icon=":material/thunderstorm:",
         ),
+        st.Page(
+            "app_pages/revenue_analysis.py",
+            title="Umsatz nach Pickup-Zone",
+            icon=":material/attach_money:",
+        ),
     ],
     position="top",
 )
 
+# Shared page title; the pages themselves do not render their own title.
 st.title(page.title, icon=page.icon)
 page.run()

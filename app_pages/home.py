@@ -1,3 +1,5 @@
+"""Landing page with links to all dashboard pages."""
+
 import streamlit as st
 
 
@@ -12,5 +14,11 @@ st.page_link(
     "app_pages/weather_comparison.py",
     label="Wetter & Mobilität öffnen",
     icon=":material/thunderstorm:",
+    width="stretch",
+)
+st.page_link(
+    "app_pages/revenue_analysis.py",
+    label="Umsatz nach Pickup-Zone öffnen",
+    icon=":material/attach_money:",
     width="stretch",
 )

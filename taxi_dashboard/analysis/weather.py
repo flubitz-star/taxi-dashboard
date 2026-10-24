@@ -21,7 +21,15 @@ from taxi_dashboard.data.databricks import normalize_boolean, query_table
 
 @st.cache_data(ttl=300)
 def load_weather_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load and prepare the compact daily and hourly Gold comparison tables."""
+    """Load and prepare the compact daily and hourly Gold comparison tables.
+
+    Converts the string values returned by Databricks to dates, numbers and
+    booleans and adds `taxi_share_pct` (taxi trips as a percentage of taxi plus
+    bike trips) and `month` ("YYYY-MM"). The result is cached for five minutes.
+
+    Returns:
+        A tuple `(daily, hourly)` of DataFrames.
+    """
     # Load both curated tables and normalize the field types so the analysis logic
     # can safely aggregate dates, counts, temperatures, and rain values.
     daily = query_table(
@@ -97,26 +105,35 @@ def load_weather_data() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def _to_bool(value: object) -> bool | None:
+    """Convert a Databricks boolean-like value to bool (None if unknown)."""
     return normalize_boolean(value)
 
 
 def _share_from_counts(taxi: pd.Series, bike: pd.Series) -> pd.Series:
+    """Return taxi trips as a percentage of taxi plus bike trips (NaN if no trips)."""
     # Calculate taxi share from raw counts while guarding against zero totals.
     total = taxi + bike
     return (100 * taxi / total).where(total > 0)
 
 
 def _format_number(value: float, suffix: str = "") -> str:
+    """Format a number without decimals, or "Keine Daten" if it is missing."""
     # Format large numeric values so the KPI cards remain compact and readable.
     return f"{value:,.0f}{suffix}" if pd.notna(value) else "Keine Daten"
 
 
 def _format_percent(value: float) -> str:
+    """Format a percentage with one decimal place, or "Keine Daten" if missing."""
     # Keep percentage values with a single decimal place for clean dashboard output.
     return f"{value:.1f}%" if pd.notna(value) else "Keine Daten"
 
 
 def _temperature_groups(hourly: pd.DataFrame) -> pd.DataFrame:
+    """Group hourly rows into temperature buckets (see TEMP_BUCKETS).
+
+    Returns one row per bucket with the mean taxi share, mean taxi and bike trips
+    per hour, and `observations`, the number of hourly rows in the bucket.
+    """
     # Aggregate hourly trips by temperature bucket to compare trip demand and taxi share.
     data = hourly.dropna(subset=["temperature_2m_c", "taxi_share_pct"]).copy()
     data["temp_bucket"] = pd.cut(
@@ -139,6 +156,11 @@ def _temperature_groups(hourly: pd.DataFrame) -> pd.DataFrame:
 
 
 def _rain_groups(hourly: pd.DataFrame) -> pd.DataFrame:
+    """Group hourly rows into rain-intensity buckets (see RAIN_BUCKETS).
+
+    Returns one row per bucket with the mean taxi share and `observations`, the
+    number of hourly rows (not trips) in the bucket.
+    """
     # Group hourly records by rain intensity to reveal how precipitation affects taxi demand.
     data = hourly.dropna(subset=["rain_mm", "taxi_share_pct"]).copy()
     data["rain_bucket"] = pd.cut(
@@ -159,6 +181,11 @@ def _rain_groups(hourly: pd.DataFrame) -> pd.DataFrame:
 
 
 def _monthly_chart(daily: pd.DataFrame) -> go.Figure:
+    """Build the daily trend chart.
+
+    Stacked bars show taxi and bike trips per day, a line shows the taxi share, a
+    shaded band shows the min-max temperature, and rainy days are highlighted.
+    """
     # Main monthly trend chart combining trip counts, taxi share, and temperature range.
     data = daily.dropna(subset=["pickup_date"]).sort_values("pickup_date")
     fig = go.Figure()
@@ -253,6 +280,11 @@ def _monthly_chart(daily: pd.DataFrame) -> go.Figure:
 
 
 def _temperature_chart(hourly: pd.DataFrame) -> go.Figure:
+    """Build the temperature chart: trips per hour and taxi share by temperature.
+
+    The labels `n=...` on the taxi-share bars are the number of hourly rows in
+    each temperature bucket.
+    """
     # Plot average trip counts and taxi share grouped by hourly temperature bands.
     summary = _temperature_groups(hourly)
     fig = make_subplots(
@@ -305,6 +337,7 @@ def _temperature_chart(hourly: pd.DataFrame) -> go.Figure:
 
 
 def _rain_daily_chart(daily: pd.DataFrame) -> go.Figure:
+    """Build a scatter plot of daily rainfall (mm) vs. taxi share, one point per day."""
     # Scatter plot for daily rainfall and taxi share, with color intensity showing rainy hours.
     fig = go.Figure()
     points = daily.dropna(subset=["total_rain_mm", "taxi_share_pct"]).copy()
@@ -334,6 +367,11 @@ def _rain_daily_chart(daily: pd.DataFrame) -> go.Figure:
 
 
 def _hourly_rain_chart(hourly: pd.DataFrame) -> go.Figure:
+    """Build a bar chart of the mean taxi share per hourly rain intensity.
+
+    The dotted line marks the share for dry hours; `n=...` is the number of
+    hourly rows in each bucket.
+    """
     # Compare taxi share across hourly rain intensities to reveal weather sensitivity.
     summary = _rain_groups(hourly)
     fig = go.Figure()
@@ -367,6 +405,7 @@ def _hourly_rain_chart(hourly: pd.DataFrame) -> go.Figure:
 
 
 def _data_quality_messages(daily: pd.DataFrame, hourly: pd.DataFrame) -> list[str]:
+    """Return warnings about duplicate rows, invalid dates or negative trip counts."""
     # Validate the selected month for duplicate rows, missing timestamps, or invalid counts.
     messages = []
     for label, frame, key, expected_per_day in (
@@ -386,6 +425,11 @@ def _data_quality_messages(daily: pd.DataFrame, hourly: pd.DataFrame) -> list[st
 
 
 def render_weather_comparison() -> None:
+    """Render the weather comparison page for a selectable month.
+
+    Shows KPI cards, a daily trend chart, taxi share by temperature band, daily
+    rainfall vs. taxi share and taxi share by hourly rain intensity.
+    """
     # Render the dashboard page for the chosen month, including KPI cards and weather-driven charts.
     st.caption(
         "Vergleicht Taxi- und Bike-Nachfrage mit Temperatur und Niederschlag. "
