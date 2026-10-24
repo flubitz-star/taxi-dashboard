@@ -252,21 +252,22 @@ def _monthly_chart(daily: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         barmode="stack",
         height=430,
-        margin={"r": 90},
-        xaxis_title="Datum",
+        margin={"r": 20},
+        # Leave room on the right so both secondary axes sit side by side.
+        xaxis={"title": "Datum", "domain": [0, 0.86]},
         yaxis={"title": "Trips pro Tag"},
         yaxis2={
-            "title": "Taxi-Share",
+            "title": {"text": "Taxi-Share", "standoff": 4},
             "overlaying": "y",
             "side": "right",
             "range": [0, 100],
             "ticksuffix": "%",
         },
         yaxis3={
-            "title": "Temperatur",
+            "title": {"text": "Temperatur", "standoff": 4},
             "overlaying": "y",
             "side": "right",
-            "position": 1,
+            "position": 0.95,
             "anchor": "free",
             "ticksuffix": "°C",
             "showgrid": False,
